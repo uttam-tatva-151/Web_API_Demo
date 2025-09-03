@@ -1,91 +1,131 @@
 using System.Linq.Expressions;
+using Core.Beans;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Query;
 
 namespace Data.BaseRepository
 {
-    /// <summary>
-    /// Generic repository implementation for standard CRUD operations.
-    /// 
-    /// Usage:
-    /// - Use AddAsync, Update, and Remove to track changes.
-    /// - Changes are NOT saved to the database until UnitOfWork.CompleteAsync() is called.
-    /// - Fetch methods support filtering, projection, and eager loading (includes).
-    /// - Use asNoTracking=true for read-only queries to improve performance.
-    /// </summary>
-    public class GenericRepository<T>(AppDbContext context) : IGenericRepository<T> where T : class
+    public class GenericRepository<T> : IGenericRepository<T> where T : class
     {
-        protected readonly AppDbContext _context = context;
-        protected readonly DbSet<T> _dbSet = context.Set<T>();
+        protected readonly AppDbContext _context;
+        protected readonly DbSet<T> _dbSet;
 
-        // Fetching single/multiple entities
-        public virtual async Task<T?> GetByIdAsync(object id) => await _dbSet.FindAsync(id);
-        public virtual async Task<IEnumerable<T>> GetAllAsync() => await _dbSet.ToListAsync();
-        public virtual async Task<IEnumerable<T>> FindAsync(Expression<Func<T, bool>> predicate)
-            => await _dbSet.Where(predicate).ToListAsync();
+        public GenericRepository(AppDbContext context)
+        {
+            _context = context ?? throw new ArgumentNullException(nameof(context));
+            _dbSet = _context.Set<T>();
+        }
 
-        // Adding, updating, removing entities (tracked, not saved)
-        public virtual async Task AddAsync(T entity) => await _dbSet.AddAsync(entity);
-        public virtual async Task AddRangeAsync(IEnumerable<T> entities) => await _dbSet.AddRangeAsync(entities);
-        public virtual void Update(T entity) => _dbSet.Update(entity);
-        public virtual void UpdateRange(IEnumerable<T> entities) => _dbSet.UpdateRange(entities);
+        // Fetch single by PK
+        public virtual async Task<T?> GetByIdAsync(object id, CancellationToken cancellationToken = default)
+        {
+            T? entity = await _dbSet.FindAsync([id], cancellationToken);
+            return entity;
+        }
 
-        // Advanced queries with projection and tracking options
+        // Unified Get: use filter == null to get all
+        public virtual async Task<IEnumerable<T>> GetListAsync(
+            Expression<Func<T, bool>>? filter = null,
+            CancellationToken cancellationToken = default)
+        {
+            IQueryable<T> query = _dbSet;
+            if (filter != null) query = query.Where(filter);
+            return await query.ToListAsync(cancellationToken);
+        }
+
+        // Add / AddRange / Update / UpdateRange (tracked; do not save here)
+        public virtual async Task AddAsync(T entity, CancellationToken cancellationToken = default)
+            => await _dbSet.AddAsync(entity, cancellationToken);
+
+        public virtual async Task AddRangeAsync(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+            => await _dbSet.AddRangeAsync(entities, cancellationToken);
+
+        public virtual void Update(T entity, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _dbSet.Update(entity);
+        }
+
+        public virtual void UpdateRange(IEnumerable<T> entities, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _dbSet.UpdateRange(entities);
+        }
+
+        // Projection: FirstOrDefault with QueryOptions<T, TResult>
         public virtual async Task<TResult?> GetFirstOrDefaultAsync<TResult>(
-            Expression<Func<T, bool>> predicate,
-            Expression<Func<T, TResult>> selector,
-            Func<IQueryable<T>, IIncludableQueryable<T, object>>? include = null,
-            bool asNoTracking = true)
+            QueryOptions<T, TResult> options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+            if (options.Selector == null) throw new ArgumentNullException(nameof(options.Selector), "Selector is required for projection queries.");
+
             IQueryable<T> query = _dbSet;
-            if (include != null) query = include(query);
-            if (asNoTracking) query = query.AsNoTracking();
-            return await query.Where(predicate).Select(selector).FirstOrDefaultAsync();
+
+            if (options.Include != null) query = options.Include(query);
+            if (options.AsNoTracking) query = query.AsNoTracking();
+            if (options.Predicate != null) query = query.Where(options.Predicate);
+
+            return await query.Select(options.Selector).FirstOrDefaultAsync(cancellationToken);
         }
 
+        // Non-projection: FirstOrDefault returning entity T
         public virtual async Task<T?> GetFirstOrDefaultAsync(
-            Expression<Func<T, bool>> predicate,
-            Func<IQueryable<T>, IIncludableQueryable<T, object>>? include = null,
-            bool asNoTracking = true)
+            QueryOptions<T> options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
             IQueryable<T> query = _dbSet;
-            if (include != null) query = include(query);
-            if (asNoTracking) query = query.AsNoTracking();
-            return await query.FirstOrDefaultAsync(predicate);
+
+            if (options.Include != null) query = options.Include(query);
+            if (options.AsNoTracking) query = query.AsNoTracking();
+            if (options.Predicate != null) query = query.Where(options.Predicate);
+
+            return await query.FirstOrDefaultAsync(cancellationToken);
         }
 
+        // Projection: List with selector
         public virtual async Task<List<TResult>> GetListAsync<TResult>(
-            Expression<Func<T, bool>> predicate,
-            Expression<Func<T, TResult>> selector,
-            Func<IQueryable<T>, IIncludableQueryable<T, object>>? include = null,
-            bool asNoTracking = true)
+            QueryOptions<T, TResult> options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+            if (options.Selector == null) throw new ArgumentNullException(nameof(options.Selector), "Selector is required for projection queries.");
+
             IQueryable<T> query = _dbSet;
-            if (asNoTracking) query = query.AsNoTracking();
-            if (include != null) query = include(query);
-            return await query.Where(predicate).Select(selector).ToListAsync();
+
+            if (options.Include != null) query = options.Include(query);
+            if (options.AsNoTracking) query = query.AsNoTracking();
+            if (options.Predicate != null) query = query.Where(options.Predicate);
+
+            return await query.Select(options.Selector).ToListAsync(cancellationToken);
         }
 
+        // Non-projection: List of entities
         public virtual async Task<List<T>> GetListAsync(
-            Expression<Func<T, bool>> predicate,
-            Func<IQueryable<T>, IIncludableQueryable<T, object>>? include = null,
-            bool asNoTracking = true)
+            QueryOptions<T> options,
+            CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
             IQueryable<T> query = _dbSet;
-            if (asNoTracking) query = query.AsNoTracking();
-            if (include != null) query = include(query);
-            return await query.Where(predicate).ToListAsync();
+
+            if (options.Include != null) query = options.Include(query);
+            if (options.AsNoTracking) query = query.AsNoTracking();
+            if (options.Predicate != null) query = query.Where(options.Predicate);
+
+            return await query.ToListAsync(cancellationToken);
         }
+
         // Utility methods
-        public virtual async Task<int> CountAsync(Expression<Func<T, bool>>? predicate = null)
+        public virtual async Task<int> CountAsync(Expression<Func<T, bool>>? predicate = null, CancellationToken cancellationToken = default)
         {
             if (predicate != null)
-                return await _dbSet.CountAsync(predicate);
-            return await _dbSet.CountAsync();
+                return await _dbSet.CountAsync(predicate, cancellationToken);
+            return await _dbSet.CountAsync(cancellationToken);
         }
 
-        public virtual async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate)
-            => await _dbSet.AnyAsync(predicate);
+        public virtual async Task<bool> ExistsAsync(Expression<Func<T, bool>> predicate, CancellationToken cancellationToken = default)
+            => await _dbSet.AnyAsync(predicate, cancellationToken);
     }
-
 }

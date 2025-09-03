@@ -1,5 +1,6 @@
 using Common.ConstantHandler;
 using Common.ConstantHandler.Enums;
+using Core.Beans;
 using Core.Beans.Enums;
 using Core.DTOs;
 using Data.Entity;
@@ -45,7 +46,7 @@ public class ManufacturerService(IUnitOfWork unitOfWork, IMemoryCache cache) : I
         }
     }
 
-    public async Task<List<ManufacturerDTO>> GetAllManufacturersAsync()
+    public async Task<List<ManufacturerDTO>> GetAllManufacturersAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -54,7 +55,7 @@ public class ManufacturerService(IUnitOfWork unitOfWork, IMemoryCache cache) : I
             if (!_cache.TryGetValue("AllManufacturers", out manufacturerList))
             {
                 // Cache miss: fetch from DB
-                IEnumerable<Manufacturer> manufacturers = await _unitOfWork.Manufacturers.GetAllAsync();
+                IEnumerable<Manufacturer> manufacturers = await _unitOfWork.Manufacturers.GetListAsync(cancellationToken: cancellationToken);
 
                 manufacturerList = [.. manufacturers.Select(m => new ManufacturerDTO
                 {
@@ -86,13 +87,17 @@ public class ManufacturerService(IUnitOfWork unitOfWork, IMemoryCache cache) : I
         {
             ResponseResult<ManufacturerDTO> result = new();
             ManufacturerDTO? manufacturer = await _unitOfWork.Manufacturers.GetFirstOrDefaultAsync
-                                                        (m => m.Id == id, //predicate
-                                                            m => new ManufacturerDTO  // selector
+                                                        ( new QueryOptions<Manufacturer, ManufacturerDTO>
                                                             {
-                                                                Id = m.Id,
-                                                                Name = m.Name,
-                                                                Country = m.Country,
-                                                                CreatedAt = m.CreatedAt
+                                                                Predicate = m => m.Id == id,
+                                                                Selector = m => new ManufacturerDTO
+                                                                {
+                                                                    Id = m.Id,
+                                                                    Name = m.Name,
+                                                                    Country = m.Country,
+                                                                    CreatedAt = m.CreatedAt
+                                                                },
+                                                                // AsNoTracking defaults to true; leave as-is for read-only projection
                                                             }
                                                         );
             if (manufacturer == null)
@@ -120,7 +125,12 @@ public class ManufacturerService(IUnitOfWork unitOfWork, IMemoryCache cache) : I
         try
         {
             ResponseResult<bool> result = new();
-            Manufacturer? existingManufacturer = await _unitOfWork.Manufacturers.GetFirstOrDefaultAsync(m => m.Id == id);
+            Manufacturer? existingManufacturer = await _unitOfWork.Manufacturers.
+                                                        GetFirstOrDefaultAsync(new QueryOptions<Manufacturer>
+                                                                            {
+                                                                                Predicate = m => m.Id == id,
+                                                                                AsNoTracking = false // match original call which used asNoTracking: false
+                                                                            });
             if (existingManufacturer == null)
             {
                 result.Status = ResponseStatus.NotFound;
