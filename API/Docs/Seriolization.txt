@@ -1,0 +1,95 @@
+--------->      JSON Serialization (JavaScript Object Notation) 
+------  Seriolization : Converts object to JSON text.
+
+
+-------------------------------------------------------------------------------------
+public class Car
+{
+    public string Model { get; set; } = "Corolla";
+    public decimal Price { get; set; } = 20000;
+}
+
+// Serialization
+
+Car car = new Car();
+string json = JsonSerializer.Serialize(car);
+Console.WriteLine(json);
+// Output: {"Model":"Corolla","Price":20000}
+
+// Deserialization
+
+Car car2 = JsonSerializer.Deserialize<Car>(json)!;
+Console.WriteLine(car2.Model); // Corolla
+
+---------------------------------------------------------------------------------------
+
+--------->      XML Serialization (eXtensible Markup Language) 
+------  Seriolization : Converts object to XML text.
+
+Ex:1
+-------------------------------------------------------------------------------------
+public class Car
+{
+    public string Model { get; set; } = "Corolla";
+    public decimal Price { get; set; } = 20000;
+}
+
+// Serialization
+
+Car car = new Car();
+XmlSerializer xmlSerializer = new(typeof(Car));
+using (StringWriter writer = new StringWriter())
+{
+    xmlSerializer.Serialize(writer, car);
+    string xml = writer.ToString();
+    Console.WriteLine(xml);
+}
+
+// Deserialization
+
+string xmlData = "<Car><Model>Corolla</Model><Price>20000</Price></Car>";
+using (StringReader reader = new StringReader(xmlData))
+{
+    Car car2 = (Car)xmlSerializer.Deserialize(reader)!;
+    Console.WriteLine(car2.Model); // Corolla
+}
+
+-------------------------------------------------------------------------------------
+Ex:2
+-------------------------------------------------------------------------------------
+public class Book
+{
+    // A public, parameterless constructor is required for serialization.
+    public Book() { }
+
+    public string Title { get; set; }
+    public string Author { get; set; }
+    public int PublicationYear { get; set; }
+}
+
+public void SerializeBook(string filePath, Book book)
+{
+    XmlSerializer serializer = new(typeof(Book));
+    using (StreamReader writer = new(filePath))
+    {
+        serializer.Serialize(writer, book);
+    }
+}
+public Book DeserializeBook(string filePath)
+{
+    XmlSerializer serializer = new (typeof(Book));
+    using (StreamReader reader = new (filePath))
+    {
+        return (Book)serializer.Deserialize(reader);
+    }
+}
+-------------------------------------------------------------------------------------
+The resulting XML file (book.xml) would look like this:
+
+<?xml version="1.0" encoding="utf-8"?>
+<Book>
+  <Title>The Lord of the Rings</Title>
+  <Author>J.R.R. Tolkien</Author>
+  <PublicationYear>1954</PublicationYear>
+</Book>
+-------------------------------------------------------------------------------------
